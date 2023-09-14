@@ -32,7 +32,19 @@ class Step(State):
 
 class Output(State):
     async def run(self):
-        # send messages to all players
+        for player in self.agent.world_model["players"]:
+            player_jid = player["jid"]
+            player_data = player.copy()
+            del player_data["jid"]  # no need to send player jid
+            body = {"type": "update", "info": player_data}
+            msg = Message(
+                to=str(player_jid),
+                sender=str(self.agent.jid),
+                body=json.dumps(body),
+                metadata={"performative", "inform"},
+            )
+            await self.send(msg)
+
         self.agent.next_step_time = datetime.now() + self.period_timedelta
         self.set_next_state(STATE_INPUT)
 
