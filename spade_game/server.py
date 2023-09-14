@@ -20,7 +20,7 @@ class Input(State):
         else:
             msg = await self.receive()
             if msg:
-                self.agent.update_world_model(msg)
+                self.agent.decode_message(msg)
             self.set_next_state(STATE_INPUT)
 
 class Step(State):
