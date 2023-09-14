@@ -96,7 +96,7 @@ class Server(Agent):
     def step(self):
         raise NotImplementedError("Subclasses must implement this")
 
-    def decode_message(self, message: str):
+    def decode_message(self, message: Message):
         sender_jid = message.sender
         content = json.loads(message.body)
 
@@ -110,19 +110,19 @@ class Server(Agent):
             # TO-DO: error message should be sent here
             return
 
-    def _process_connection(self, sender_jid: str, info: Dict[str, Any]) -> None:
+    def _process_connection(self, sender_jid: str, content: Dict[str, Any]) -> None:
         # check if player is already connected
         if self._find_player(sender_jid) is not None:
             # TO-DO: error message should be sent
             return
 
         # check if data necessary for connection is being received
-        if list(info.keys) == self.connection_attributes:
+        if list(content.keys) == self.connection_attributes:
             # initialize player data
             player_data = self.player_attributes.copy()
             for key, value in player_data.items():
                 if value is None:
-                    value = info[key]
+                    value = content[key]
             player_data["jid"] = sender_jid
             player_data["action"] = None
 
@@ -132,7 +132,7 @@ class Server(Agent):
             # TO-DO: error message should be sent here
             return
 
-    def _process_disconnection(self, sender_jid: str, info: Dict[str, Any]) -> None:
+    def _process_disconnection(self, sender_jid: str, content: Dict[str, Any]) -> None:
         player = self._find_player(sender_jid)
 
         if player is None:
@@ -143,7 +143,7 @@ class Server(Agent):
             # TO-DO: disconnection message here
 
     def _process_action(
-        self, sender_jid: str, info: Union[Dict[str, Any], Any]
+        self, sender_jid: str, content: Union[Dict[str, Any], Any]
     ) -> None:
         player = self._find_player(sender_jid)
 
@@ -151,12 +151,12 @@ class Server(Agent):
             # TO-DO: error message should be sent here
             return
         else:
-            if isinstance(info, dict):
+            if isinstance(content, dict):
                 # check if action has the expected attributes
-                if list(info.keys) != self.action_attributes:
+                if list(content.keys) != self.action_attributes:
                     # TO-DO: error message should be sent here
                     return
-            player["action"] = info
+            player["action"] = content
 
     def _find_player(self, player_jid) -> Union[Dict[str, Any], None]:
         # look for player in world model
