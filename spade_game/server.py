@@ -11,8 +11,6 @@ STATE_INPUT = "STATE_INPUT"
 STATE_STEP = "STATE_STEP"
 STATE_OUTPUT = "STATE_OUTPUT"
 
-# Server Finite State Machine
-
 
 # Server States
 class Input(State):
@@ -71,6 +69,17 @@ class Server(Agent):
 
         # set action attributes
         self.action_attributes = action_atrributes
+
+    async def setup(self):
+        fsm = FSMBehaviour()
+        fsm.add_state(name=STATE_INPUT, state=Input(), initial=True)
+        fsm.add_state(name=STATE_STEP, state=Step())
+        fsm.add_state(name=STATE_OUTPUT, state=Output())
+        fsm.add_transition(source=STATE_INPUT, dest=STATE_INPUT)
+        fsm.add_transition(source=STATE_INPUT, dest=STATE_STEP)
+        fsm.add_transition(source=STATE_STEP, dest=STATE_OUTPUT)
+        fsm.add_transition(source=STATE_OUTPUT, dest=STATE_INPUT)
+        self.add_behaviour(fsm)
 
     def step(self):
         raise NotImplementedError("Subclasses must implement this")
