@@ -41,11 +41,11 @@ class Output(State):
                 to=str(player_jid),
                 sender=str(self.agent.jid),
                 body=json.dumps(body),
-                metadata={"performative", "inform"},
+                metadata={"performative": "inform"},
             )
             await self.send(msg)
 
-        self.agent.next_step_time = datetime.now() + self.period_timedelta
+        self.agent.next_step_time = datetime.now() + self.agent.period_timedelta
         self.set_next_state(STATE_INPUT)
 
 
@@ -70,7 +70,7 @@ class Server(Agent):
         self.world_model["players"] = []
 
         # set list of params to return
-        self.player_attributes = list(player_attributes.keys())
+        self.player_attributes = player_attributes
 
         # set connection attributes
         self.connection_attributes = [
@@ -99,7 +99,7 @@ class Server(Agent):
     def decode_message(self, message: Message):
         sender_jid = message.sender
         content = json.loads(message.body)
-
+        
         if content["type"] == "connect":
             self._process_connection(sender_jid, content["info"])
         elif content["type"] == "disconnect":
@@ -115,15 +115,15 @@ class Server(Agent):
         if self._find_player(sender_jid) is not None:
             # TO-DO: error message should be sent
             return
-
+        
         # check if data necessary for connection is being received
-        if list(content.keys) == self.connection_attributes:
+        if list(content.keys()) == self.connection_attributes:
             # initialize player data
             player_data = self.player_attributes.copy()
             for key, value in player_data.items():
                 if value is None:
-                    value = content[key]
-            player_data["jid"] = sender_jid
+                    player_data[key] = content[key]
+            player_data["jid"] = str(sender_jid)
             player_data["action"] = None
 
             # add player data to world model

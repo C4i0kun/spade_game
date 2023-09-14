@@ -6,9 +6,9 @@ from spade.message import Message
 from spade.behaviour import FSMBehaviour, State
 
 # State definitions
-STATE_CONNECT = "STATE_INPUT"
-STATE_INPUT = "STATE_OUTPUT"
-STATE_ACTION = "STATE_OUTPUT"
+STATE_CONNECT = "STATE_CONNECT"
+STATE_INPUT = "STATE_INPUT"
+STATE_ACTION = "STATE_ACTION"
 STATE_OUTPUT = "STATE_OUTPUT"
 STATE_DISCONNECT = "STATE_DISCONNECT" # TO-DO ?
 
@@ -19,11 +19,12 @@ class Connect(State):
             "type": "connect",
             "info": self.agent.initial_attributes,
         }
+
         msg = Message(
             to=str(self.agent.server_jid),
             sender=str(self.agent.jid),
             body=json.dumps(body),
-            metadata={"performative", "inform"}
+            metadata={"performative": "inform"}
         )
 
         await self.send(msg)
@@ -49,11 +50,12 @@ class Output(State):
             "type": "action",
             "info": self.agent.action
         }
+        
         msg = Message(
             to=str(self.agent.server_jid),
             sender=str(self.agent.jid),
             body=json.dumps(body),
-            metadata={"performative", "inform"}
+            metadata={"performative": "inform"}
         )
 
         await self.send(msg)
