@@ -97,7 +97,7 @@ class Server(Agent):
         raise NotImplementedError("Subclasses must implement this")
 
     def decode_message(self, message: Message):
-        sender_jid = message.sender
+        sender_jid = str(message.sender)
         content = json.loads(message.body)
         
         if content["type"] == "connect":
@@ -105,7 +105,7 @@ class Server(Agent):
         elif content["type"] == "disconnect":
             self._process_disconnection(sender_jid, content["info"])
         elif content["type"] == "action":
-            self._process_action(sender_jid, content["action"])
+            self._process_action(sender_jid, content["info"])
         else:
             # TO-DO: error message should be sent here
             return

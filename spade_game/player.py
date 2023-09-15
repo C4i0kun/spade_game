@@ -92,7 +92,7 @@ class Player(Agent):
         raise NotImplementedError("Subclasses must implement this")
     
     def decode_message(self, message: Message) -> None:
-        sender_jid = message.sender
+        sender_jid = str(message.sender)
         content = json.loads(message.body)
 
         if content["type"] == "update":
