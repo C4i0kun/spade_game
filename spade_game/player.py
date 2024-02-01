@@ -41,7 +41,7 @@ class Input(State):
                 self.agent.decode_message(msg)
             except Exception as e:
                 print(
-                    "[{}] Error in message received: {}.".format(
+                    "[{}] Error in message received: {}".format(
                         str(self.agent.jid), e.message
                     )
                 )

@@ -6,6 +6,13 @@ from spade.agent import Agent
 from spade.message import Message
 from spade.behaviour import FSMBehaviour, State
 
+from .exceptions import (
+    MessageTypeError,
+    PlayerAlreadyConnectedError,
+    PlayerNotFoundError,
+    InvalidContentError,
+)
+
 # State definitions
 STATE_INPUT = "STATE_INPUT"
 STATE_STEP = "STATE_STEP"
@@ -20,7 +27,14 @@ class Input(State):
         else:
             msg = await self.receive()
             if msg:
-                self.agent.decode_message(msg)
+                try:
+                    self.agent.decode_message(msg)
+                except Exception as e:
+                    print(
+                        "[{}] Error in message received: {}".format(
+                            str(self.agent.jid), e.message
+                        )
+                    )
             self.set_next_state(STATE_INPUT)
 
 
@@ -99,23 +113,21 @@ class Server(Agent):
     def decode_message(self, message: Message):
         sender_jid = str(message.sender)
         content = json.loads(message.body)
-        
+
         if content["type"] == "connect":
             self._process_connection(sender_jid, content["info"])
         elif content["type"] == "disconnect":
             self._process_disconnection(sender_jid, content["info"])
         elif content["type"] == "action":
-            self._process_action(sender_jid, content["info"])
+            self._process_action(sender_jid)
         else:
-            # TO-DO: error message should be sent here
-            return
+            raise MessageTypeError(content["type"])
 
     def _process_connection(self, sender_jid: str, content: Dict[str, Any]) -> None:
         # check if player is already connected
         if self._find_player(sender_jid) is not None:
-            # TO-DO: error message should be sent
-            return
-        
+            raise PlayerAlreadyConnectedError(sender_jid)
+
         # check if data necessary for connection is being received
         if list(content.keys()) == self.connection_attributes:
             # initialize player data
@@ -129,18 +141,18 @@ class Server(Agent):
             # add player data to world model
             self.world_model["players"].append(player_data)
         else:
-            # TO-DO: error message should be sent here
-            return
+            raise InvalidContentError(
+                "connect", list(content.keys()), self.connection_attributes
+            )
 
-    def _process_disconnection(self, sender_jid: str, content: Dict[str, Any]) -> None:
+    def _process_disconnection(self, sender_jid: str) -> None:
         player = self._find_player(sender_jid)
 
         if player is None:
-            # TO-DO: error message should be sent here
-            return
+            raise PlayerNotFoundError(sender_jid)
         else:
             self.world_model["players"].remove(player)
-            # TO-DO: disconnection message here
+            print("[{}] Player {} disconnected.".format(str(self.jid), sender_jid))
 
     def _process_action(
         self, sender_jid: str, content: Union[Dict[str, Any], Any]
@@ -148,14 +160,14 @@ class Server(Agent):
         player = self._find_player(sender_jid)
 
         if player is None:
-            # TO-DO: error message should be sent here
-            return
+            raise PlayerNotFoundError(sender_jid)
         else:
             if isinstance(content, dict):
                 # check if action has the expected attributes
-                if list(content.keys) != self.action_attributes:
-                    # TO-DO: error message should be sent here
-                    return
+                if list(content.keys()) != self.action_attributes:
+                    raise InvalidContentError(
+                        "action", list(content.keys()), self.action_attributes
+                    )
             player["action"] = content
 
     def _find_player(self, player_jid) -> Union[Dict[str, Any], None]:
