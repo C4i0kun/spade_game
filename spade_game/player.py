@@ -38,12 +38,10 @@ class Input(State):
         msg = await self.receive()
         if msg:
             try:
-                self.agent.decode_message(msg)
+                await self.agent.decode_message(msg)
             except Exception as e:
                 print(
-                    "[{}] Error in message received: {}".format(
-                        str(self.agent.jid), e.message
-                    )
+                    "[{}] Error in message received: {}".format(str(self.agent.jid), e)
                 )
                 self.set_next_state(STATE_INPUT)
             else:
@@ -105,17 +103,30 @@ class Player(Agent):
     def decide_action(self) -> Union[Dict[str, Any], Any]:
         raise NotImplementedError("Subclasses must implement this")
 
-    def decode_message(self, message: Message) -> None:
+    async def decode_message(self, message: Message) -> None:
         sender_jid = str(message.sender)
         content = json.loads(message.body)
 
         if content["type"] == "update":
             self._process_update(sender_jid, content["info"])
+        elif content["type"] == "disconnect":
+            await self._process_disconnection(sender_jid)
         else:
             raise MessageTypeError(content["type"])
 
     def _process_update(self, sender_jid: str, content: Dict[str, Any]) -> None:
         if sender_jid == self.server_jid:
             self.world_model = content
+        else:
+            raise UnauthorizedSenderError(sender_jid)
+
+    async def _process_disconnection(self, sender_jid: str) -> None:
+        if sender_jid == self.server_jid:
+            print(
+                "[{}] Disconnection order received by server. Disconnecting...".format(
+                    str(self.jid)
+                )
+            )
+            await self.stop()
         else:
             raise UnauthorizedSenderError(sender_jid)

@@ -32,7 +32,7 @@ class Input(State):
                 except Exception as e:
                     print(
                         "[{}] Error in message received: {}".format(
-                            str(self.agent.jid), e.message
+                            str(self.agent.jid), e
                         )
                     )
             self.set_next_state(STATE_INPUT)
@@ -46,6 +46,16 @@ class Step(State):
 
 class Output(State):
     async def run(self):
+        if self.agent.end_condition():
+            await self._disconnect_all_players()
+            print("[{}] Game ended. Stopping server...".format(str(self.agent.jid)))
+            await self.agent.stop()
+        else:
+            await self._update_all_players()
+            self.agent.next_step_time = datetime.now() + self.agent.period_timedelta
+            self.set_next_state(STATE_INPUT)
+
+    async def _update_all_players(self) -> None:
         for player in self.agent.world_model["players"]:
             player_jid = player["jid"]
             player_data = player.copy()
@@ -59,8 +69,20 @@ class Output(State):
             )
             await self.send(msg)
 
-        self.agent.next_step_time = datetime.now() + self.agent.period_timedelta
-        self.set_next_state(STATE_INPUT)
+    async def _disconnect_all_players(self) -> None:
+        for player in self.agent.world_model["players"]:
+            player_jid = player["jid"]
+            body = {"type": "disconnect"}
+            msg = Message(
+                to=str(player_jid),
+                sender=str(self.agent.jid),
+                body=json.dumps(body),
+                metadata={"performative": "inform"},
+            )
+            await self.send(msg)
+
+            # remove player from player list
+            self.agent._process_disconnection(player_jid)
 
 
 # Server Agent
@@ -74,7 +96,7 @@ class Server(Agent):
         action_atrributes: Optional[List[str]] = None,
         frequency: Optional[int] = 10,
         verify_security: Optional[bool] = False,
-    ):
+    ) -> None:
         super().__init__(jid, password, verify_security)
         self.period_timedelta = timedelta(milliseconds=1000 / frequency)
         self.next_step_time = datetime.now() + self.period_timedelta
@@ -96,7 +118,7 @@ class Server(Agent):
         # set action attributes
         self.action_attributes = action_atrributes
 
-    async def setup(self):
+    async def setup(self) -> None:
         fsm = FSMBehaviour()
         fsm.add_state(name=STATE_INPUT, state=Input(), initial=True)
         fsm.add_state(name=STATE_STEP, state=Step())
@@ -107,19 +129,22 @@ class Server(Agent):
         fsm.add_transition(source=STATE_OUTPUT, dest=STATE_INPUT)
         self.add_behaviour(fsm)
 
-    def step(self):
-        raise NotImplementedError("Subclasses must implement this")
+    def step(self) -> None:
+        raise NotImplementedError("Subclasses must implement this.")
 
-    def decode_message(self, message: Message):
+    def end_condition(self) -> bool:
+        raise NotImplementedError("Subclasses must implement this.")
+
+    def decode_message(self, message: Message) -> None:
         sender_jid = str(message.sender)
         content = json.loads(message.body)
 
         if content["type"] == "connect":
             self._process_connection(sender_jid, content["info"])
         elif content["type"] == "disconnect":
-            self._process_disconnection(sender_jid, content["info"])
+            self._process_disconnection(sender_jid)
         elif content["type"] == "action":
-            self._process_action(sender_jid)
+            self._process_action(sender_jid, content["info"])
         else:
             raise MessageTypeError(content["type"])
 
