@@ -201,7 +201,17 @@ class Server(Agent):
                     raise InvalidContentError(
                         "action", list(content.keys()), self.action_attributes
                     )
-            player["action"] = content
+            if self._is_action_valid(content):
+                player["action"] = content
+            else:
+                print(
+                    "[{}] Player {} sent an invalid action, so it's being disconsidered.".format(
+                        str(self.jid), sender_jid
+                    )
+                )
+
+    def _is_action_valid(self, content: Union[Dict[str, Any], Any]) -> bool:
+        return True
 
     def _find_player(self, player_jid) -> Union[Dict[str, Any], None]:
         # look for player in world model
