@@ -41,6 +41,7 @@ class Input(State):
 class Step(State):
     async def run(self):
         self.agent.step()
+        self.agent.on_step_end()
         self.set_next_state(STATE_OUTPUT)
 
 
@@ -52,7 +53,7 @@ class Output(State):
             await self.agent.stop()
         else:
             await self._update_all_players()
-            self.agent.next_step_time = datetime.now() + self.agent.period_timedelta
+            self.agent.on_output_end()
             self.set_next_state(STATE_INPUT)
 
     async def _send_update_message(self, player) -> None:
@@ -137,8 +138,17 @@ class Server(Agent):
         fsm.add_transition(source=STATE_OUTPUT, dest=STATE_INPUT)
         self.add_behaviour(fsm)
 
+    def step_condition(self) -> bool:
+        return datetime.now() > self.next_step_time
+
     def step(self) -> None:
         raise NotImplementedError("Subclasses must implement this.")
+    
+    def on_step_end(self) -> None:
+        pass
+
+    def on_output_end(self) -> None:
+        self.next_step_time = datetime.now() + self.period_timedelta
 
     def end_condition(self) -> bool:
         raise NotImplementedError("Subclasses must implement this.")
