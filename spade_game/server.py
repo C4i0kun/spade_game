@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta
 from typing import Optional, Union, List, Dict, Any
+from abc import ABC, abstractmethod
 
 from spade.agent import Agent
 from spade.message import Message
@@ -94,8 +95,8 @@ class Output(State):
             self.agent._process_disconnection(player_jid)
 
 
-# Server Agent
-class Server(Agent):
+# Abstract Server Agent
+class Server(Agent, ABC):
     def __init__(
         self,
         jid: str,
@@ -103,12 +104,9 @@ class Server(Agent):
         game_attributes: Dict[str, Any],
         player_attributes: Dict[str, Any],
         action_atrributes: Optional[List[str]] = None,
-        frequency: Optional[int] = 10,
         verify_security: Optional[bool] = False,
     ) -> None:
         super().__init__(jid, password, verify_security)
-        self.period_timedelta = timedelta(milliseconds=1000 / frequency)
-        self.next_step_time = datetime.now() + self.period_timedelta
 
         # initialize world model
         self.world_model = game_attributes.copy()
@@ -138,18 +136,23 @@ class Server(Agent):
         fsm.add_transition(source=STATE_OUTPUT, dest=STATE_INPUT)
         self.add_behaviour(fsm)
 
+    @abstractmethod
     def step_condition(self) -> bool:
-        return datetime.now() > self.next_step_time
+        raise NotImplementedError("Subclasses must implement this.")
 
+    @abstractmethod
     def step(self) -> None:
         raise NotImplementedError("Subclasses must implement this.")
-    
+
+    @abstractmethod
     def on_step_end(self) -> None:
-        pass
+        raise NotImplementedError("Subclasses must implement this.")
 
+    @abstractmethod
     def on_output_end(self) -> None:
-        self.next_step_time = datetime.now() + self.period_timedelta
+        raise NotImplementedError("Subclasses must implement this.")
 
+    @abstractmethod
     def end_condition(self) -> bool:
         raise NotImplementedError("Subclasses must implement this.")
 
@@ -229,3 +232,37 @@ class Server(Agent):
             if player["jid"] == player_jid:
                 return player
         return None
+
+
+# Abstract Continuous Server Agent
+class ContinuousServer(Server):
+    def __init__(
+        self,
+        jid: str,
+        password: str,
+        game_attributes: Dict[str, Any],
+        player_attributes: Dict[str, Any],
+        action_atrributes: Optional[List[str]] = None,
+        verify_security: Optional[bool] = False,
+        frequency: Optional[int] = 10,
+    ) -> None:
+        super().__init__(
+            jid,
+            password,
+            game_attributes,
+            player_attributes,
+            action_atrributes,
+            verify_security,
+        )
+        self.period_timedelta = timedelta(milliseconds=1000 / frequency)
+        self.next_step_time = datetime.now() + self.period_timedelta
+
+    def step_condition(self) -> bool:
+        return datetime.now() > self.next_step_time
+
+    def on_step_end(self) -> None:
+        pass
+
+    def on_output_end(self) -> None:
+        self.next_step_time = datetime.now() + self.period_timedelta
+
