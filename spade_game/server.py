@@ -23,7 +23,7 @@ STATE_OUTPUT = "STATE_OUTPUT"
 # Server States
 class Input(State):
     async def run(self):
-        if datetime.now() > self.agent.next_step_time:
+        if datetime.now() > self.agent.next_step_time and self.agent.running_steps:
             self.set_next_state(STATE_STEP)
         else:
             msg = await self.receive()
@@ -108,6 +108,9 @@ class Server(Agent, ABC):
     ) -> None:
         super().__init__(jid, password, verify_security)
 
+        # Server starts without running steps
+        self.running_steps = False
+
         # initialize world model
         self.world_model = game_attributes.copy()
         self.world_model["players"] = []
@@ -155,6 +158,9 @@ class Server(Agent, ABC):
     @abstractmethod
     def end_condition(self) -> bool:
         raise NotImplementedError("Subclasses must implement this.")
+
+    def run_steps(self) -> None:
+        self.running_steps = True
 
     def decode_message(self, message: Message) -> None:
         sender_jid = str(message.sender)
@@ -265,4 +271,3 @@ class ContinuousServer(Server):
 
     def on_output_end(self) -> None:
         self.next_step_time = datetime.now() + self.period_timedelta
-
