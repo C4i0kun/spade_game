@@ -23,7 +23,7 @@ STATE_OUTPUT = "STATE_OUTPUT"
 # Server States
 class Input(State):
     async def run(self):
-        if datetime.now() > self.agent.next_step_time and self.agent.running_steps:
+        if self.agent.step_condition() and self.agent.running_steps:
             self.set_next_state(STATE_STEP)
         else:
             msg = await self.receive()
@@ -41,6 +41,7 @@ class Input(State):
 
 class Step(State):
     async def run(self):
+        self.agent.on_step_start()
         self.agent.step()
         self.agent.on_step_end()
         self.set_next_state(STATE_OUTPUT)
@@ -53,6 +54,7 @@ class Output(State):
             print("[{}] Game ended. Stopping server...".format(str(self.agent.jid)))
             await self.agent.stop()
         else:
+            self.agent.on_output_start()
             await self._update_all_players()
             self.agent.on_output_end()
             self.set_next_state(STATE_INPUT)
@@ -61,6 +63,9 @@ class Output(State):
         player_jid = player["jid"]
         player_data = player.copy()
         del player_data["jid"]  # no need to send player jid
+        for key in list(player_data.keys()):
+            if key.startswith("_"):  # delete control attributes
+                del player_data[key]
         body = {"type": "update", "info": player_data}
         msg = Message(
             to=str(player_jid),
@@ -128,6 +133,10 @@ class Server(Agent, ABC):
         # set action attributes
         self.action_attributes = action_atrributes
 
+        # List of players who can perform actions and receive updates.
+        self.can_perform_action = []
+        self.can_receive_update = []
+
     async def setup(self) -> None:
         fsm = FSMBehaviour()
         fsm.add_state(name=STATE_INPUT, state=Input(), initial=True)
@@ -148,18 +157,24 @@ class Server(Agent, ABC):
         raise NotImplementedError("Subclasses must implement this.")
 
     @abstractmethod
-    def on_step_end(self) -> None:
-        raise NotImplementedError("Subclasses must implement this.")
-
-    @abstractmethod
-    def on_output_end(self) -> None:
-        raise NotImplementedError("Subclasses must implement this.")
-
-    @abstractmethod
     def end_condition(self) -> bool:
         raise NotImplementedError("Subclasses must implement this.")
 
+    def on_step_start(self) -> None:
+        pass
+
+    def on_step_end(self) -> None:
+        pass
+
+    def on_output_start(self) -> None:
+        pass
+
+    def on_output_end(self) -> None:
+        pass
+
     def run_steps(self) -> None:
+        self.can_perform_action = self._all_player_jids()
+        self.can_receive_update = self._all_player_jids()
         self.running_steps = True
 
     def decode_message(self, message: Message) -> None:
@@ -176,6 +191,15 @@ class Server(Agent, ABC):
             raise MessageTypeError(content["type"])
 
     def _process_connection(self, sender_jid: str, content: Dict[str, Any]) -> None:
+        # if game is already running, player can't connect
+        if self.running_steps:
+            print(
+                "[{}] Player {} connection not allowed. Game already started.".format(
+                    str(self.jid), sender_jid
+                )
+            )
+            return
+
         # check if player is already connected
         if self._find_player(sender_jid) is not None:
             raise PlayerAlreadyConnectedError(sender_jid)
@@ -189,6 +213,7 @@ class Server(Agent, ABC):
                     player_data[key] = content[key]
             player_data["jid"] = str(sender_jid)
             player_data["action"] = None
+            player_data["_action_datetime"] = datetime.now()
 
             # add player data to world model
             self.world_model["players"].append(player_data)
@@ -204,11 +229,27 @@ class Server(Agent, ABC):
             raise PlayerNotFoundError(sender_jid)
         else:
             self.world_model["players"].remove(player)
+            # the player can be in the list of players who can perform
+            # actions or receive updates. We must take it.
+            try:
+                self.can_perform_action.remove(sender_jid)
+                self.can_receive_update.remove(sender_jid)
+            except:
+                # if it's not, nothing needs to me done.
+                pass
             print("[{}] Player {} disconnected.".format(str(self.jid), sender_jid))
 
     def _process_action(
         self, sender_jid: str, content: Union[Dict[str, Any], Any]
     ) -> None:
+        if sender_jid not in self.can_perform_action:
+            print(
+                "[{}] Player {} is not allowed to perform actions.".format(
+                    str(self.jid), sender_jid
+                )
+            )
+            return
+
         player = self._find_player(sender_jid)
 
         if player is None:
@@ -222,6 +263,10 @@ class Server(Agent, ABC):
                     )
             if self._is_action_valid(content):
                 player["action"] = content
+                player["_action_datetime"] = datetime.now()
+                # register action as last performed
+                self.world_model["_last_action_performed"] = content
+                self.world_model["_last_action_player"] = sender_jid
             else:
                 print(
                     "[{}] Player {} sent an invalid action, so it's being disconsidered.".format(
@@ -238,6 +283,9 @@ class Server(Agent, ABC):
             if player["jid"] == player_jid:
                 return player
         return None
+
+    def _all_player_jids(self) -> Union[List[Dict[str, Any]], None]:
+        return [player["jid"] for player in self.world_model["players"]]
 
 
 # Abstract Continuous Server Agent
@@ -266,8 +314,53 @@ class ContinuousServer(Server):
     def step_condition(self) -> bool:
         return datetime.now() > self.next_step_time
 
-    def on_step_end(self) -> None:
-        pass
-
     def on_output_end(self) -> None:
         self.next_step_time = datetime.now() + self.period_timedelta
+
+    def run_steps(self) -> None:
+        self.next_step_time = datetime.now() + self.period_timedelta
+        super().run_steps()
+
+
+# Abstract Turn-Based Server
+class TurnBasedServer(Server):
+    def __init__(
+        self,
+        jid: str,
+        password: str,
+        game_attributes: Dict[str, Any],
+        player_attributes: Dict[str, Any],
+        action_atrributes: Optional[List[str]] = None,
+        verify_security: Optional[bool] = False,
+    ) -> None:
+        super().__init__(
+            jid,
+            password,
+            game_attributes,
+            player_attributes,
+            action_atrributes,
+            verify_security,
+        )
+        # initialize first player turn
+        self._current_player_jid = None
+
+    def run_steps(self) -> None:
+        self._current_player_jid = self._next_player_jid()
+        if self._current_player_jid is None:
+            print(
+                "[{}] Server could not define the next player in the game.".format(
+                    str(self.jid),
+                )
+            )
+        else:
+            self.running_steps = True
+
+    def _next_player_jid(self) -> Union[str, None]:
+        oldest_play_datetime = datetime.now()
+        next_player_jid = None
+
+        for player in self.world_model["player"]:
+            if player["_action_datetime"] < oldest_play_datetime:
+                oldest_play_datetime = player["_action_datetime"]
+                next_player_jid = player["jid"]
+        return next_player_jid
