@@ -23,7 +23,12 @@ STATE_OUTPUT = "STATE_OUTPUT"
 # Server States
 class Input(State):
     async def run(self):
-        if self.agent.step_condition() and self.agent.running_steps:
+        if (
+            self.agent.step_condition()
+            and self.agent.num_players == self.agent.num_players_needed
+        ):
+            if not self.agent.running_steps:
+                self.agent.run_steps_init()
             self.set_next_state(STATE_STEP)
         else:
             msg = await self.receive()
@@ -106,12 +111,17 @@ class Server(Agent, ABC):
         self,
         jid: str,
         password: str,
+        num_players_needed: int,
         game_attributes: Dict[str, Any],
         player_attributes: Dict[str, Any],
         action_atrributes: Optional[List[str]] = None,
         verify_security: Optional[bool] = False,
     ) -> None:
         super().__init__(jid, password, verify_security)
+
+        # Decide number of players needed to start game
+        self.num_players_needed = num_players_needed
+        self.num_players = 0
 
         # Server starts without running steps
         self.running_steps = False
@@ -172,7 +182,7 @@ class Server(Agent, ABC):
     def on_output_end(self) -> None:
         pass
 
-    def run_steps(self) -> None:
+    def run_steps_init(self) -> None:
         self.can_perform_action = self._all_player_jids()
         self.can_receive_update = self._all_player_jids()
         self.running_steps = True
@@ -217,6 +227,7 @@ class Server(Agent, ABC):
 
             # add player data to world model
             self.world_model["players"].append(player_data)
+            self.num_players += 1
         else:
             raise InvalidContentError(
                 "connect", list(content.keys()), self.connection_attributes
@@ -229,6 +240,7 @@ class Server(Agent, ABC):
             raise PlayerNotFoundError(sender_jid)
         else:
             self.world_model["players"].remove(player)
+            self.num_players -= 1
             # the player can be in the list of players who can perform
             # actions or receive updates. We must take it.
             try:
@@ -294,6 +306,7 @@ class ContinuousServer(Server):
         self,
         jid: str,
         password: str,
+        num_players_needed: int,
         game_attributes: Dict[str, Any],
         player_attributes: Dict[str, Any],
         action_atrributes: Optional[List[str]] = None,
@@ -303,6 +316,7 @@ class ContinuousServer(Server):
         super().__init__(
             jid,
             password,
+            num_players_needed,
             game_attributes,
             player_attributes,
             action_atrributes,
@@ -317,9 +331,9 @@ class ContinuousServer(Server):
     def on_output_end(self) -> None:
         self.next_step_time = datetime.now() + self.period_timedelta
 
-    def run_steps(self) -> None:
+    def run_steps_init(self) -> None:
         self.next_step_time = datetime.now() + self.period_timedelta
-        super().run_steps()
+        super().run_steps_init()
 
 
 # Abstract Turn-Based Server
@@ -328,6 +342,7 @@ class TurnBasedServer(Server):
         self,
         jid: str,
         password: str,
+        num_players_needed: int,
         game_attributes: Dict[str, Any],
         player_attributes: Dict[str, Any],
         action_atrributes: Optional[List[str]] = None,
@@ -337,6 +352,7 @@ class TurnBasedServer(Server):
             jid,
             password,
             game_attributes,
+            num_players_needed,
             player_attributes,
             action_atrributes,
             verify_security,
@@ -344,7 +360,7 @@ class TurnBasedServer(Server):
         # initialize first player turn
         self._current_player_jid = None
 
-    def run_steps(self) -> None:
+    def run_steps_init(self) -> None:
         self._current_player_jid = self._next_player_jid()
         if self._current_player_jid is None:
             print(
