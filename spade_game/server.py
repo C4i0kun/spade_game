@@ -23,25 +23,29 @@ STATE_OUTPUT = "STATE_OUTPUT"
 # Server States
 class Input(State):
     async def run(self):
-        if (
-            self.agent.step_condition()
-            and self.agent.num_players == self.agent.num_players_needed
-        ):
+        if self.agent.num_players == self.agent.num_players_needed:
             if not self.agent.running_steps:
                 self.agent.run_steps_init()
-            self.set_next_state(STATE_STEP)
+            if self.agent.step_condition():
+                self.set_next_state(STATE_STEP)
+            else:
+                await self._check_messages()
+                self.set_next_state(STATE_INPUT)
         else:
-            msg = await self.receive()
-            if msg:
-                try:
-                    self.agent.decode_message(msg)
-                except Exception as e:
-                    print(
-                        "[{}] Error in message received: {}".format(
-                            str(self.agent.jid), e
-                        )
-                    )
+            await self._check_messages()
             self.set_next_state(STATE_INPUT)
+
+    async def _check_messages(self):
+        msg = await self.receive()
+        if msg:
+            try:
+                self.agent.decode_message(msg)
+            except Exception as e:
+                print(
+                    "[{}] Error in message received: {}".format(
+                        str(self.agent.jid), e
+                    )
+                )
 
 
 class Step(State):
@@ -60,7 +64,7 @@ class Output(State):
             await self.agent.stop()
         else:
             self.agent.on_output_start()
-            await self._update_all_players()
+            await self._update_players(self.agent.can_receive_update)
             self.agent.on_output_end()
             self.set_next_state(STATE_INPUT)
 
@@ -84,6 +88,10 @@ class Output(State):
         player = self.agent._find_player(player_jid)
         if player is not None:
             await self._send_update_message(player)
+
+    async def _update_players(self, player_jids) -> None:
+        for player_jid in player_jids:
+            await self._update_player(player_jid)
 
     async def _update_all_players(self) -> None:
         for player in self.agent.world_model["players"]:
@@ -254,6 +262,7 @@ class Server(Agent, ABC):
     def _process_action(
         self, sender_jid: str, content: Union[Dict[str, Any], Any]
     ) -> None:
+        
         if sender_jid not in self.can_perform_action:
             print(
                 "[{}] Player {} is not allowed to perform actions.".format(
@@ -347,18 +356,37 @@ class TurnBasedServer(Server):
         player_attributes: Dict[str, Any],
         action_atrributes: Optional[List[str]] = None,
         verify_security: Optional[bool] = False,
+        round_period: Optional[int] = 1,
     ) -> None:
         super().__init__(
             jid,
             password,
-            game_attributes,
             num_players_needed,
+            game_attributes,
             player_attributes,
             action_atrributes,
             verify_security,
         )
         # initialize first player turn
         self._current_player_jid = None
+
+        self.period_timedelta = timedelta(milliseconds=1000 * round_period)
+        self.next_step_time = datetime.now() + self.period_timedelta
+
+    def step_condition(self) -> bool:
+        if datetime.now() <= self.next_step_time:
+            return False
+        if "_last_action_player" in self.world_model:
+            return self.world_model["_last_action_player"] in self.can_perform_action
+        return True
+
+    def on_step_end(self) -> None:
+        self._current_player_jid = self._next_player_jid()
+        self.can_perform_action = [self._current_player_jid]
+        self.can_receive_update = [self._current_player_jid]
+
+    def on_output_end(self) -> None:
+        self.next_step_time = datetime.now() + self.period_timedelta
 
     def run_steps_init(self) -> None:
         self._current_player_jid = self._next_player_jid()
@@ -369,13 +397,14 @@ class TurnBasedServer(Server):
                 )
             )
         else:
+            self.can_perform_action = self._current_player_jid
             self.running_steps = True
 
     def _next_player_jid(self) -> Union[str, None]:
         oldest_play_datetime = datetime.now()
         next_player_jid = None
 
-        for player in self.world_model["player"]:
+        for player in self.world_model["players"]:
             if player["_action_datetime"] < oldest_play_datetime:
                 oldest_play_datetime = player["_action_datetime"]
                 next_player_jid = player["jid"]
