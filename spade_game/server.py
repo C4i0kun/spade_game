@@ -42,9 +42,7 @@ class Input(State):
                 self.agent.decode_message(msg)
             except Exception as e:
                 print(
-                    "[{}] Error in message received: {}".format(
-                        str(self.agent.jid), e
-                    )
+                    "[{}] Error in message received: {}".format(str(self.agent.jid), e)
                 )
 
 
@@ -124,6 +122,7 @@ class Server(Agent, ABC):
         player_attributes: Dict[str, Any],
         action_atrributes: Optional[List[str]] = None,
         verify_security: Optional[bool] = False,
+        frequency: Optional[int] = 10,
     ) -> None:
         super().__init__(jid, password, verify_security)
 
@@ -155,6 +154,9 @@ class Server(Agent, ABC):
         self.can_perform_action = []
         self.can_receive_update = []
 
+        self.period_timedelta = timedelta(milliseconds=1000 / frequency)
+        self.next_step_time = datetime.now() + self.period_timedelta
+
     async def setup(self) -> None:
         fsm = FSMBehaviour()
         fsm.add_state(name=STATE_INPUT, state=Input(), initial=True)
@@ -166,9 +168,8 @@ class Server(Agent, ABC):
         fsm.add_transition(source=STATE_OUTPUT, dest=STATE_INPUT)
         self.add_behaviour(fsm)
 
-    @abstractmethod
     def step_condition(self) -> bool:
-        raise NotImplementedError("Subclasses must implement this.")
+        return datetime.now() > self.next_step_time
 
     @abstractmethod
     def step(self) -> None:
@@ -188,9 +189,10 @@ class Server(Agent, ABC):
         pass
 
     def on_output_end(self) -> None:
-        pass
+        self.next_step_time = datetime.now() + self.period_timedelta
 
     def run_steps_init(self) -> None:
+        self.next_step_time = datetime.now() + self.period_timedelta
         self.can_perform_action = self._all_player_jids()
         self.can_receive_update = self._all_player_jids()
         self.running_steps = True
@@ -262,7 +264,7 @@ class Server(Agent, ABC):
     def _process_action(
         self, sender_jid: str, content: Union[Dict[str, Any], Any]
     ) -> None:
-        
+
         if sender_jid not in self.can_perform_action:
             print(
                 "[{}] Player {} is not allowed to perform actions.".format(
@@ -309,8 +311,8 @@ class Server(Agent, ABC):
         return [player["jid"] for player in self.world_model["players"]]
 
 
-# Abstract Continuous Server Agent
-class ContinuousServer(Server):
+# Abstract Turn-Based Server
+class TurnBasedServer(Server):
     def __init__(
         self,
         jid: str,
@@ -330,48 +332,10 @@ class ContinuousServer(Server):
             player_attributes,
             action_atrributes,
             verify_security,
-        )
-        self.period_timedelta = timedelta(milliseconds=1000 / frequency)
-        self.next_step_time = datetime.now() + self.period_timedelta
-
-    def step_condition(self) -> bool:
-        return datetime.now() > self.next_step_time
-
-    def on_output_end(self) -> None:
-        self.next_step_time = datetime.now() + self.period_timedelta
-
-    def run_steps_init(self) -> None:
-        self.next_step_time = datetime.now() + self.period_timedelta
-        super().run_steps_init()
-
-
-# Abstract Turn-Based Server
-class TurnBasedServer(Server):
-    def __init__(
-        self,
-        jid: str,
-        password: str,
-        num_players_needed: int,
-        game_attributes: Dict[str, Any],
-        player_attributes: Dict[str, Any],
-        action_atrributes: Optional[List[str]] = None,
-        verify_security: Optional[bool] = False,
-        round_period: Optional[int] = 1,
-    ) -> None:
-        super().__init__(
-            jid,
-            password,
-            num_players_needed,
-            game_attributes,
-            player_attributes,
-            action_atrributes,
-            verify_security,
+            frequency,
         )
         # initialize first player turn
         self._current_player_jid = None
-
-        self.period_timedelta = timedelta(milliseconds=1000 * round_period)
-        self.next_step_time = datetime.now() + self.period_timedelta
 
     def step_condition(self) -> bool:
         if datetime.now() <= self.next_step_time:

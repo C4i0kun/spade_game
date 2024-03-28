@@ -7,4 +7,4 @@ __email__ = 'csbc326@gmail.com'
 __version__ = '0.0.1'
 
 from .player import Player
-from .server import Server, ContinuousServer, TurnBasedServer
+from .server import Server, TurnBasedServer
