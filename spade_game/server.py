@@ -26,7 +26,8 @@ class Input(State):
         if self.agent.num_players == self.agent.num_players_needed:
             if not self.agent.running_steps:
                 self.agent.run_steps_init()
-            if self.agent.step_condition():
+                self.set_next_state(STATE_OUTPUT)
+            elif self.agent.step_condition():
                 self.set_next_state(STATE_STEP)
             else:
                 await self._check_messages()
@@ -96,7 +97,7 @@ class Output(State):
             await self._send_update_message(player)
 
     async def _disconnect_all_players(self) -> None:
-        for player in self.agent.world_model["players"]:
+        for player in self.agent.world_model["players"].copy():
             player_jid = player["jid"]
             body = {"type": "disconnect"}
             msg = Message(
@@ -164,6 +165,7 @@ class Server(Agent, ABC):
         fsm.add_state(name=STATE_OUTPUT, state=Output())
         fsm.add_transition(source=STATE_INPUT, dest=STATE_INPUT)
         fsm.add_transition(source=STATE_INPUT, dest=STATE_STEP)
+        fsm.add_transition(source=STATE_INPUT, dest=STATE_OUTPUT)
         fsm.add_transition(source=STATE_STEP, dest=STATE_OUTPUT)
         fsm.add_transition(source=STATE_OUTPUT, dest=STATE_INPUT)
         self.add_behaviour(fsm)
@@ -264,7 +266,6 @@ class Server(Agent, ABC):
     def _process_action(
         self, sender_jid: str, content: Union[Dict[str, Any], Any]
     ) -> None:
-
         if sender_jid not in self.can_perform_action:
             print(
                 "[{}] Player {} is not allowed to perform actions.".format(
@@ -340,8 +341,13 @@ class TurnBasedServer(Server):
     def step_condition(self) -> bool:
         if datetime.now() <= self.next_step_time:
             return False
-        if "_last_action_player" in self.world_model:
-            return self.world_model["_last_action_player"] in self.can_perform_action
+        if (
+            "_last_action_performed" not in self.world_model
+            or "_last_action_player" not in self.world_model
+        ):
+            return False
+        if self.world_model["_last_action_player"] not in self.can_perform_action:
+            return False
         return True
 
     def on_step_end(self) -> None:
@@ -361,7 +367,8 @@ class TurnBasedServer(Server):
                 )
             )
         else:
-            self.can_perform_action = self._current_player_jid
+            self.can_perform_action = [self._current_player_jid]
+            self.can_receive_update = [self._current_player_jid]
             self.running_steps = True
 
     def _next_player_jid(self) -> Union[str, None]:
